@@ -14,6 +14,7 @@ export default function ChatWidget() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+
   const sendMessage = async () => {
     if (!input.trim()) return;
     const newMessages = [...messages, { role: "user" as const, content: input }];
