@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-py"
+  output   = "prisma/generated/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  hashedPassword String
+  createdAt      DateTime @default(now())
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  startedAt DateTime @default(now())
+  score     Int
+
+  personaId String  @unique
+  persona   Persona @relation(fields: [personaId], references: [id])
+}
+
+model Persona {
+  id          String @id @default(cuid())
+  gender      String
+  age_group   String
+  personality String
+  tech        String
+  goal        String
+  usage       String
+  type        String
+
+  session     Session?
+  ChatSession ChatSession[]
+}
+
+model ChatSession {
+  id        String   @id @default(uuid())
+  score     Int
+  startedAt DateTime @default(now())
+  userId    String
+
+  personaId String
+  persona   Persona @relation(fields: [personaId], references: [id])
+
+  analysis ChatAnalysis? @relation("SessionToAnalysis")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String // "seller" ¶Ç´Â "ai"
+  content   String
+  timestamp DateTime @default(now())
+}
+
+model ChatAnalysis {
+  id        String      @id @default(cuid())
+  sessionId String      @unique
+  session   ChatSession @relation("SessionToAnalysis", fields: [sessionId], references: [id])
+  summary   String
+  keywords  String // ¿¹: "ai,persona,training"
+  createdAt DateTime    @default(now())
+}

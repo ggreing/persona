@@ -1,0 +1,33 @@
+{
+  "name": "sales-persona-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.12.0",
+    "@shadcn/ui": "latest",
+    "@tailwindcss/typography": "^0.5.16",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.371.0",
+    "next": "14.2.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "recharts": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.13",
+    "@types/react": "19.1.8",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.4",
+    "typescript": "5.8.3"
+  },
+  "prisma": {
+    "schema": "../backend/prisma/schema.prisma"
+  }
+}

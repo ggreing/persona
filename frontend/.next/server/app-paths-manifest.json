@@ -1,0 +1,7 @@
+{
+  "/api/analyze/route": "app/api/analyze/route.js",
+  "/page": "app/page.js",
+  "/persona-confirm/page": "app/persona-confirm/page.js",
+  "/login/page": "app/login/page.js",
+  "/chat/page": "app/chat/page.js"
+}
