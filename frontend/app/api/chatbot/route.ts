@@ -2,6 +2,11 @@ export async function POST(req: Request) {
   const { messages } = await req.json();
 
   const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    return new Response("GEMINI_API_KEY가 설정되지 않았습니다", { status: 500 });
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?key=${apiKey}`;
 
   const upstream = await fetch(url, {
@@ -15,8 +20,9 @@ export async function POST(req: Request) {
     }),
   });
 
-  if (!upstream.body) {
-    return new Response("", { status: 500 });
+
+  if (!upstream.body || !upstream.ok) {
+    return new Response("업스트림 응답 오류", { status: 500 });
   }
 
   const reader = upstream.body.getReader();
