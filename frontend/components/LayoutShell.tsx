@@ -2,6 +2,7 @@
 
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import ChatWidget from "./ChatWidget";
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   return (
@@ -11,6 +12,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
       <main className="pt-16 px-4 md:ml-56 transition-all duration-300">
         <div className="max-w-3xl mx-auto text-center">{children}</div>
       </main>
+      <ChatWidget />
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top_left,_var(--tw-gradient-stops))] from-blue-100/30 via-white/0 to-transparent z-0" />
     </div>
   );
