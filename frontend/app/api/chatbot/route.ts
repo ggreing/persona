@@ -1,62 +1,43 @@
-export async function POST(req: Request) {
-  const { messages } = await req.json();
+import { NextRequest } from 'next/server';
 
-  const apiKey = process.env.GEMINI_API_KEY;
+export const runtime = 'edge';
 
-  if (!apiKey) {
-    return new Response("GEMINI_API_KEY가 설정되지 않았습니다", { status: 500 });
+export async function POST(req: NextRequest) {
+  const body = await req.json();
+  let message = body.message;
+  let session_id = body.session_id;
+  // messages 배열이 오면 마지막 user 메시지를 자동 추출
+  if (!message && Array.isArray(body.messages)) {
+    const lastUserMsg = [...body.messages].reverse().find((m) => m.role === 'user' && m.content && typeof m.content === 'string' && m.content.trim());
+    if (lastUserMsg) message = lastUserMsg.content;
+    else {
+      return new Response('No valid user message found in messages array', { status: 400 });
+    }
+  }
+  if (!message || typeof message !== 'string' || !message.trim() || !session_id) {
+    return new Response('message and session_id required', { status: 400 });
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?key=${apiKey}`;
+  const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000/chatbot';
 
-  const upstream = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: messages.map((m: any) => ({
-        role: m.role === "user" ? "user" : "model",
-        parts: [{ text: m.content }],
-      })),
-    }),
-  });
-
-
-  if (!upstream.body || !upstream.ok) {
-    return new Response("업스트림 응답 오류", { status: 500 });
-  }
-
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-            if (data === "" || data === "[DONE]") continue;
-            try {
-              const json = JSON.parse(data);
-              const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) controller.enqueue(encoder.encode(text));
-            } catch (e) {
-              // ignore parse errors
-            }
-          }
-        }
-      }
-      controller.close();
+  const backendRes = await fetch(backendUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({ message, session_id }),
   });
 
-  return new Response(stream, {
-    headers: { "Content-Type": "text/plain" },
+  if (!backendRes.body) {
+    return new Response('No response body from backend', { status: 500 });
+  }
+
+  return new Response(backendRes.body, {
+    status: backendRes.status,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
   });
 }

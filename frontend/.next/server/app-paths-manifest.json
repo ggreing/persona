@@ -1,7 +1,6 @@
 {
-  "/api/analyze/route": "app/api/analyze/route.js",
+  "/api/chatbot/route": "app/api/chatbot/route.js",
+  "/admin/personas/page": "app/admin/personas/page.js",
   "/page": "app/page.js",
-  "/persona-confirm/page": "app/persona-confirm/page.js",
-  "/login/page": "app/login/page.js",
-  "/chat/page": "app/chat/page.js"
+  "/persona-confirm/page": "app/persona-confirm/page.js"
 }

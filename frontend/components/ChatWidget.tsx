@@ -1,6 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import { v4 as uuidv4 } from "uuid";
+// 세션ID를 브라우저 세션에 저장/재사용
+function getOrCreateSessionId() {
+  if (typeof window === 'undefined') return '';
+  let sessionId = window.sessionStorage.getItem('simple_chatbot_session_id');
+  if (!sessionId) {
+    sessionId = uuidv4();
+    window.sessionStorage.setItem('simple_chatbot_session_id', sessionId);
+  }
+  return sessionId;
+}
 
 interface Message {
   role: "user" | "assistant";
@@ -13,6 +24,13 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, loading]);
 
 
   const sendMessage = async () => {
@@ -25,10 +43,11 @@ export default function ChatWidget() {
 
     // Stream response from API
     try {
+      const sessionId = getOrCreateSessionId();
       const res = await fetch("/api/chatbot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ messages: newMessages, session_id: sessionId }),
       });
 
       if (!res.body || !res.ok) {
@@ -94,6 +113,8 @@ export default function ChatWidget() {
             {error && (
               <div className="text-xs text-red-500">{error}</div>
             )}
+            {/* 스크롤 자동 이동용 더미 */}
+            <div ref={messagesEndRef} />
           </div>
           <form onSubmit={handleSubmit} className="p-2 border-t">
             <input

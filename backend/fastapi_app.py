@@ -16,7 +16,7 @@ from google.auth import default
 
 from sales_persona_backend.ai import SalesPersonaAI
 from sales_persona_backend.personas import random_persona, SCENARIOS, PERSONAS, PRESET_PERSONAS
-
+from sales_persona_backend.ai import SalesPersonaAI, SimpleChatbotAI
 from sales_persona_backend.router import router as main_router
 
 from dotenv import load_dotenv
@@ -32,6 +32,8 @@ app.add_middleware(
 )
 app.include_router(main_router)
 _sessions: dict[str, SalesPersonaAI] = {}
+# Simple chatbot session memory
+_simple_sessions: dict[str, SimpleChatbotAI] = {}
 
 # 종료된 세션을 추적하기 위한 전역 딕셔너리
 _session_closed: dict[str, bool] = {}
@@ -183,24 +185,26 @@ def get_access_token():
     except Exception:
         return None
 
-@app.post("/tts")
-async def text_to_speech(req: Request):
+@app.post("/chatbot")
+async def chatbot(req: Request):
     data = await req.json()
-    text = data.get("text")
-    if not text:
-        raise HTTPException(400, detail="텍스트가 없습니다")
+    user_msg = data.get("message")
+    session_id = data.get("session_id")
+    if not user_msg or not session_id:
+        raise HTTPException(400, detail="message and session_id required")
+    if session_id not in _simple_sessions:
+        _simple_sessions[session_id] = SimpleChatbotAI()
+    engine = _simple_sessions[session_id]
+    generator = engine.stream_response(user_msg)
 
-    lang = data.get("lang", "ko")
-    persona = data.get("persona")
-    voice_style = data.get("voice_style")
+    async def event_stream():
+        try:
+            for chunk in generator:
+                yield f"{chunk}\n"
+        except Exception as e:
+            yield f"error: {str(e)}\n"
 
-    processed_text, emotions = process_text_for_tts(text)
-    if len(processed_text) > 5000:
-        processed_text = processed_text[:5000] + "..."
-
-    language_code, voice_name = get_voice_by_persona(persona, voice_style)
-
-    _, audio_config = adjust_voice_by_emotion(voice_name, emotions)
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
     audio_config["audioEncoding"] = "MP3"
 
     access_token = get_access_token()
@@ -346,7 +350,7 @@ async def chat(req: Request):
     # 세션 종료 여부 확인
     if _session_closed.get(session_id):
         async def end_stream():
-            yield "data: 이미 종료된 대화입니다.\n\n"
+            yield "이미 종료된 대화입니다.\n"
         return StreamingResponse(end_stream(), media_type="text/event-stream")
 
     if session_id not in _sessions:
@@ -359,7 +363,7 @@ async def chat(req: Request):
             full_response = ""
             for chunk in generator:
                 full_response += chunk
-                yield f"data: {chunk}\n\n"
+                yield f"{chunk}\n"
 
             # UPDATED: 대화 종료 태그를 감지하면 세션만 종료하고 추가 이벤트를 보내지 않음
             if "<대화 종료>" in full_response:
@@ -367,7 +371,7 @@ async def chat(req: Request):
                 # 자동 분석 페이지 이동 신호를 보내지 않음
 
         except Exception as e:
-            yield f"event: error\ndata: {str(e)}\n\n"
+            yield f"error: {str(e)}\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -447,3 +451,31 @@ async def autoclose(req: Request):
         raise HTTPException(404, detail="session not found")
     should_close, reason = engine.maybe_autoclose()
     return JSONResponse({"should_close": should_close, "reason": reason})
+# =====================
+# 일상 챗봇 엔드포인트
+# =====================
+
+
+# Simple chatbot with session memory
+@app.post("/chatbot")
+async def chatbot(req: Request):
+    data = await req.json()
+    user_msg = data.get("message")
+    session_id = data.get("session_id")
+    if not user_msg:
+        raise HTTPException(400, detail="message required")
+    if not session_id:
+        raise HTTPException(400, detail="session_id required")
+    if session_id not in _simple_sessions:
+        _simple_sessions[session_id] = SimpleChatbotAI()
+    engine = _simple_sessions[session_id]
+    generator = engine.stream_response(user_msg)
+
+    async def event_stream():
+        try:
+            for chunk in generator:
+                yield f"{chunk}\n"
+        except Exception as e:
+            yield f"error: {str(e)}\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")

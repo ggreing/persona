@@ -16,20 +16,20 @@
       "static/chunks/main-app.js",
       "static/chunks/app/persona-confirm/page.js"
     ],
-    "/chat/page": [
+    "/stats/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/chat/page.js"
+      "static/chunks/app/stats/page.js"
+    ],
+    "/admin/personas/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/admin/personas/page.js"
     ],
     "/login/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/login/page.js"
-    ],
-    "/analyze/[sessionId]/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/analyze/[sessionId]/page.js"
     ]
   }
 }

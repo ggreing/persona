@@ -250,3 +250,44 @@ class SalesPersonaAI:
         reply = model.generate_content(prompt).text.strip()
         reply = reply.replace('"', '').replace("'", '')
         return reply
+    
+class SimpleChatbotAI:
+    """일상적인 대화용 챗봇 엔진 (페르소나/시나리오/기억 없이 단순 LLM)"""
+    def __init__(self):
+        self.model = genai.GenerativeModel(model_name=MODEL_NAME)
+        self.history: list[str] = []  # Store conversation as ["User: ...", "AI: ..."]
+
+    def _build_prompt(self, user_msg: str) -> str:
+        # Build prompt with history for context
+        prompt = """
+당신은 친근하고 일상적인 대화를 나누는 챗봇입니다. 아래는 지금까지의 대화 기록입니다. 대화 맥락을 기억하며 자연스럽게 이어가세요.
+"""
+        if self.history:
+            prompt += "\n\n[대화 기록]\n" + "\n".join(self.history)
+        prompt += f"\n사용자: {user_msg}\n챗봇:"
+        return prompt
+
+    def stream_response(self, user_msg: str) -> Iterable[str]:
+        import re
+        self.history.append(f"사용자: {user_msg}")
+        prompt = self._build_prompt(user_msg)
+        try:
+            full = self.model.generate_content(prompt).text.strip()
+        except Exception as e:
+            full = f"(응답 생성 실패: {e})"
+        # Remove markdown and clean up
+        plain = re.sub(r'[`*_#\-\[\]()>~]', '', full)
+        plain = re.sub(r'\n+', ' ', plain)
+        # Add to history
+        self.history.append(f"챗봇: {plain}")
+        # Stream by sentence
+        sentences = re.split(r'([.!?])', plain)
+        buf = ''
+        for part in sentences:
+            buf += part
+            if part in '.!?':
+                yield buf.strip() + ' '
+                buf = ''
+                time.sleep(0.1)
+        if buf.strip():
+            yield buf.strip() + ' '
