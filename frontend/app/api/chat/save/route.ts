@@ -4,9 +4,14 @@ import { prisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
   try {
-    const { sessionId, role, content } = await req.json();
+    const body = await req.json();
+    console.log("chat/save body:", body); // 실제 전달값 로그
+    const sessionId = body.sessionId || body.session_id;
+    const role = body.role;
+    const content = body.content;
 
-    if (!sessionId || !role || !content) {
+    // content가 null/undefined만 400, 빈 문자열은 허용
+    if (!sessionId || !role || content === null || content === undefined) {
       return NextResponse.json({ error: "필수값 누락" }, { status: 400 });
     }
 

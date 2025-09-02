@@ -1,5 +1,9 @@
 {
-  "/page": "app/page.js",
   "/persona-confirm/page": "app/persona-confirm/page.js",
-  "/admin/personas/page": "app/admin/personas/page.js"
+  "/page": "app/page.js",
+  "/stats/page": "app/stats/page.js",
+  "/stats/[id]/page": "app/stats/[id]/page.js",
+  "/api/stats/route": "app/api/stats/route.js",
+  "/chat/page": "app/chat/page.js",
+  "/api/stats/[id]/route": "app/api/stats/[id]/route.js"
 }

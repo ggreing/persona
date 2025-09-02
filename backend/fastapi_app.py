@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, PlainTextResponse, Response
+from pydantic import BaseModel
 import uuid
 import os
 import base64
 import httpx
-import io
 import json
 import re
 
@@ -14,9 +14,8 @@ from google.oauth2 import service_account
 from google.auth.transport.requests import Request as GoogleRequest
 from google.auth import default
 
-from sales_persona_backend.ai import SalesPersonaAI
-from sales_persona_backend.personas import random_persona, SCENARIOS, PERSONAS, PRESET_PERSONAS
 from sales_persona_backend.ai import SalesPersonaAI, SimpleChatbotAI
+from sales_persona_backend.personas import random_persona, SCENARIOS, PERSONAS, PRESET_PERSONAS
 from sales_persona_backend.router import router as main_router
 
 from dotenv import load_dotenv
@@ -31,17 +30,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(main_router)
-_sessions: dict[str, SalesPersonaAI] = {}
-# Simple chatbot session memory
-_simple_sessions: dict[str, SimpleChatbotAI] = {}
 
-# 종료된 세션을 추적하기 위한 전역 딕셔너리
+# 세션 저장소
+_sessions: dict[str, SalesPersonaAI] = {}
+_simple_sessions: dict[str, SimpleChatbotAI] = {}
 _session_closed: dict[str, bool] = {}
 
 @app.get("/")
 def root():
     return {"message": "Sales Persona API active"}
 
+# -----------------------
+# 유틸: TTS 텍스트/음성 설정
+# -----------------------
 def process_text_for_tts(text: str) -> tuple[str, dict]:
     """TTS용 텍스트 처리: 괄호 안의 감정 표현 추출 및 발화용 텍스트 생성"""
     emotions = {}
@@ -89,32 +90,32 @@ def adjust_voice_by_emotion(voice_name: str, emotions: dict) -> tuple[str, dict]
     """감정에 따른 음성 조정"""
     audio_config = {
         "audioEncoding": "MP3",
-        "speakingRate": 1.2,
+        "speakingRate": 1.3,
         "pitch": 0.2,
         "volumeGainDb": 0.4
     }
     if 'laugh' in emotions or 'smile' in emotions:
-        audio_config["pitch"] = 2.0; audio_config["speakingRate"] = 1.2
+        audio_config["pitch"] = 2.0; audio_config["speakingRate"] = 1.3
     elif 'warm' in emotions or 'friendly' in emotions:
-        audio_config["pitch"] = 1.0; audio_config["speakingRate"] = 1.2
+        audio_config["pitch"] = 1.0; audio_config["speakingRate"] = 1.3
     elif 'calm' in emotions or 'quiet' in emotions:
-        audio_config["pitch"] = -1.0; audio_config["speakingRate"] = 1.2
+        audio_config["pitch"] = -1.0; audio_config["speakingRate"] = 1.3
     elif 'bright' in emotions or 'energetic' in emotions:
-        audio_config["pitch"] = 3.0; audio_config["speakingRate"] = 1.2
+        audio_config["pitch"] = 3.0; audio_config["speakingRate"] = 1.3
     elif 'serious' in emotions or 'strong' in emotions:
-        audio_config["pitch"] = -2.0; audio_config["speakingRate"] = 0.9
+        audio_config["pitch"] = -2.0; audio_config["speakingRate"] = 1.1
     elif 'passionate' in emotions:
-        audio_config["pitch"] = 2.0; audio_config["speakingRate"] = 1.3; audio_config["volumeGainDb"] = 2.0
+        audio_config["pitch"] = 2.0; audio_config["speakingRate"] = 1.4; audio_config["volumeGainDb"] = 2.0
     elif 'soft' in emotions:
-        audio_config["pitch"] = 1.3; audio_config["speakingRate"] = 1.3; audio_config["volumeGainDb"] = -2.0
+        audio_config["pitch"] = 1.3; audio_config["speakingRate"] = 1.4; audio_config["volumeGainDb"] = -2.0
     elif 'question' in emotions:
-        audio_config["pitch"] = 3.0; audio_config["speakingRate"] = 1.2
+        audio_config["pitch"] = 3.0; audio_config["speakingRate"] = 1.3
     elif 'confident' in emotions:
-        audio_config["pitch"] = 1.0; audio_config["speakingRate"] = 1.1
+        audio_config["pitch"] = 1.0; audio_config["speakingRate"] = 1.3
     elif 'empathetic' in emotions or 'comforting' in emotions:
-        audio_config["pitch"] = 0.0; audio_config["speakingRate"] = 1.2
+        audio_config["pitch"] = 0.0; audio_config["speakingRate"] = 1.3
     elif 'encouraging' in emotions or 'praising' in emotions:
-        audio_config["pitch"] = 2.0; audio_config["speakingRate"] = 1.1; audio_config["volumeGainDb"] = 1.0
+        audio_config["pitch"] = 2.0; audio_config["speakingRate"] = 1.2; audio_config["volumeGainDb"] = 1.0
 
     if "Chirp3-HD" in voice_name:
         audio_config.pop("pitch", None)
@@ -130,7 +131,6 @@ VOICE_STYLES = {
     "umbriel": "male", "vindemiatrix": "female", "zubenelgenubi": "male", "achernar": "female"
 }
 
-# 기본 Chirp3 HD 음성 (성별-기본 매핑)
 CHIRP3_HD_VOICES = {
     "ko": {"male": "ko-KR-Chirp3-HD-Fenrir", "female": "ko-KR-Chirp3-HD-Kore"},
     "en": {"male": "en-US-Chirp3-HD-Fenrir", "female": "en-US-Chirp3-HD-Kore"},
@@ -146,7 +146,7 @@ def get_voice_by_persona(persona: dict = None, voice_style: str = None) -> tuple
         if "남성" in g or "male" in g: voice_gender = "male"
         elif "여성" in g or "female" in g: voice_gender = "female"
     key = lang_code.split("-")[0]
-    
+
     if voice_style:
         style_lower = voice_style.lower()
         male_styles = {"fenrir", "puck", "charon", "orus", "achird", "algenib", "algieba", "alnilam", "iapetus", "sadachbia", "sadaltager", "schedar", "umbriel", "zubenelgenubi", "rasalgethi"}
@@ -179,19 +179,34 @@ def get_google_credentials():
 
 def get_access_token():
     credentials = get_google_credentials()
-    if not credentials: return None
+    if not credentials:
+        return None
     try:
-        credentials.refresh(GoogleRequest()); return credentials.token
+        credentials.refresh(GoogleRequest())
+        return credentials.token
     except Exception:
         return None
 
+# -----------------------
+# 입력 스키마(검증 강화)
+# -----------------------
+class ChatIn(BaseModel):
+    session_id: str
+    seller_msg: str
+
+class ChatbotIn(BaseModel):
+    session_id: str
+    message: str
+
+# -----------------------
+# 일상 챗봇 (별칭: /chatbot, /api/chatbot)
+# -----------------------
 @app.post("/chatbot")
-async def chatbot(req: Request):
-    data = await req.json()
-    user_msg = data.get("message")
-    session_id = data.get("session_id")
-    if not user_msg or not session_id:
-        raise HTTPException(400, detail="message and session_id required")
+@app.post("/api/chatbot")  # 별칭 라우트
+async def chatbot_handler(body: ChatbotIn):
+    session_id = body.session_id
+    user_msg = body.message
+
     if session_id not in _simple_sessions:
         _simple_sessions[session_id] = SimpleChatbotAI()
     engine = _simple_sessions[session_id]
@@ -205,32 +220,159 @@ async def chatbot(req: Request):
             yield f"error: {str(e)}\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-    audio_config["audioEncoding"] = "MP3"
+
+# -----------------------
+# AI 챗(세일즈 페르소나) (별칭: /chat, /api/chat)
+# -----------------------
+@app.post("/chat")
+@app.post("/api/chat")  # 별칭 라우트
+async def chat_handler(body: ChatIn):
+    session_id = body.session_id
+    seller_msg = body.seller_msg
+
+    # 세션 종료 여부 확인
+    if _session_closed.get(session_id):
+        async def end_stream():
+            yield "이미 종료된 대화입니다.\n"
+        return StreamingResponse(end_stream(), media_type="text/event-stream")
+
+    if session_id not in _sessions:
+        _sessions[session_id] = SalesPersonaAI()
+    engine = _sessions[session_id]
+    generator = engine.stream_response(seller_msg)
+
+    async def event_stream():
+        try:
+            full_response = ""
+            for chunk in generator:
+                full_response += chunk
+                yield f"{chunk}\n"
+
+            if "<대화 종료>" in full_response:
+                _session_closed[session_id] = True
+        except Exception as e:
+            yield f"error: {str(e)}\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@app.post("/chat/initiate")
+@app.post("/api/chat/initiate")  # 별칭 라우트
+async def initiate_chat(req: Request):
+    data = await req.json()
+    session_id = data.get("session_id")
+    persona = data.get("persona")
+    if not session_id:
+        raise HTTPException(400, detail="session_id required")
+    if session_id not in _sessions:
+        if not persona:
+            persona = random_persona()
+        _sessions[session_id] = SalesPersonaAI(persona=persona)
+    _session_closed[session_id] = False
+    ai = _sessions[session_id]
+    greeting = ai.generate_first_greeting()
+    ai._append_history("AI", greeting)
+    return JSONResponse({"message": greeting})
+
+# -----------------------
+# 페르소나 관련
+# -----------------------
+@app.get("/persona/random")
+@app.get("/api/persona/random")
+def get_random_persona():
+    return random_persona()
+
+@app.get("/scenarios")
+@app.get("/api/scenarios")
+def get_scenarios():
+    return SCENARIOS
+
+@app.get("/persona")
+@app.get("/api/persona")
+def list_personas():
+    return PRESET_PERSONAS + PERSONAS
+
+@app.post("/persona")
+@app.post("/api/persona")
+async def add_persona(req: Request):
+    data = await req.json()
+    data['id'] = str(uuid.uuid4())
+    PERSONAS.append(data)
+    return data
+
+@app.delete("/persona/{persona_id}")
+@app.delete("/api/persona/{persona_id}")
+def delete_persona(persona_id: str):
+    idx = next((i for i, p in enumerate(PERSONAS) if p.get('id') == persona_id), None)
+    if idx is not None:
+        PERSONAS.pop(idx)
+        return {"success": True}
+    raise HTTPException(404, detail="Persona not found")
+
+# -----------------------
+# 퍼포먼스 분석 및 자동 종료
+# -----------------------
+@app.post("/analyze")
+@app.post("/api/analyze")
+async def analyze(req: Request):
+    data = await req.json()
+    session_id = data.get("session_id")
+    if not session_id:
+        raise HTTPException(400, detail="session_id required")
+    engine = _sessions.get(session_id)
+    if not engine:
+        raise HTTPException(404, detail="session not found")
+    text, _score = engine.analyze_conversation()
+    return PlainTextResponse(text)
+
+@app.post("/autoclose")
+@app.post("/api/autoclose")
+async def autoclose(req: Request):
+    data = await req.json()
+    session_id = data.get("session_id")
+    if not session_id:
+        raise HTTPException(400, detail="session_id required")
+    engine = _sessions.get(session_id)
+    if not engine:
+        raise HTTPException(404, detail="session not found")
+    should_close, reason = engine.maybe_autoclose()
+    return JSONResponse({"should_close": should_close, "reason": reason})
+
+# -----------------------
+# 일반 TTS (REST, MP3 반환)
+# -----------------------
+@app.post("/tts")
+@app.post("/api/tts")
+async def tts(req: Request):
+    data = await req.json()
+    text = data.get("text")
+    if not text:
+        raise HTTPException(400, detail="text는 필수입니다.")
+
+    language_code = data.get("language_code", "ko-KR")
+    voice_name = data.get("voice_name", "ko-KR-Chirp3-HD-Kore")
+    audio_config = {"audioEncoding": "MP3"}
 
     access_token = get_access_token()
     if not access_token:
-        raise HTTPException(
-            status_code=503,
-            detail="Google Cloud TTS 인증 오류"
-        )
+        raise HTTPException(status_code=503, detail="Google Cloud TTS 인증 오류")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
             "https://texttospeech.googleapis.com/v1/text:synthesize",
             json={
-                "input": {"text": processed_text},
+                "input": {"text": text},
                 "voice": {"languageCode": language_code, "name": voice_name},
                 "audioConfig": audio_config
             },
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"}
         )
         if response.status_code != 200:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Google Cloud TTS 오류: {response.text}"
-            )
+            raise HTTPException(status_code=500, detail=f"Google Cloud TTS 오류: {response.text}")
+
         tts_data = response.json()
         audio_base64 = tts_data.get("audioContent")
+        if not audio_base64:
+            raise HTTPException(500, detail="TTS 응답에 오디오 데이터가 없습니다.")
         audio_content = base64.b64decode(audio_base64)
         return Response(
             content=audio_content,
@@ -238,8 +380,11 @@ async def chatbot(req: Request):
             headers={"Content-Length": str(len(audio_content)), "Cache-Control": "no-cache"}
         )
 
-# ---------- gRPC 기반 양방향 스트리밍 TTS ----------
+# -----------------------
+# gRPC 기반 스트리밍 TTS
+# -----------------------
 @app.post("/tts/stream")
+@app.post("/api/tts/stream")
 async def tts_stream(req: Request):
     """
     요청 예시:
@@ -260,7 +405,7 @@ async def tts_stream(req: Request):
     language_code = data.get("language_code", "ko-KR")
     gender = data.get("gender", "female")
     style = data.get("voice_style")
-    speaking_rate = float(data.get("speaking_rate", 1.2))
+    speaking_rate = float(data.get("speaking_rate", 1.3))
     pitch = float(data.get("pitch", 0.2))
 
     # 음성 이름 정하기
@@ -269,6 +414,7 @@ async def tts_stream(req: Request):
         voice_name = f"{language_code}-Chirp3-HD-{style.capitalize()}"
     else:
         voice_name = f"{language_code}-Chirp3-HD-{style_map.get(gender, 'Kore')}"
+
     # gRPC 클라이언트 생성
     try:
         client = texttospeech.TextToSpeechClient()
@@ -276,10 +422,7 @@ async def tts_stream(req: Request):
         raise HTTPException(503, detail=f"Google Cloud TTS 인증 오류: {str(e)}")
 
     input_text = texttospeech.SynthesisInput(text=text)
-    voice = texttospeech.VoiceSelectionParams(
-        language_code=language_code,
-        name=voice_name
-    )
+    voice = texttospeech.VoiceSelectionParams(language_code=language_code, name=voice_name)
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
         speaking_rate=speaking_rate,
@@ -306,176 +449,5 @@ async def tts_stream(req: Request):
     return StreamingResponse(
         audio_chunk_generator(),
         media_type="audio/mpeg",
-        headers={
-            "Content-Disposition": "inline; filename=tts.mp3"
-        }
+        headers={"Content-Disposition": "inline; filename=tts.mp3"}
     )
-# -----------------------------------------------------
-
-@app.get("/tts/status")
-async def tts_status():
-    access_token = get_access_token()
-    if not access_token:
-        return {"enabled": False, "reason": "Google 인증 실패"}
-    test_text = "테스트 문장입니다"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.post(
-            "https://texttospeech.googleapis.com/v1/text:synthesize",
-            json={
-                "input": {"text": test_text},
-                "voice": {"languageCode": "ko-KR", "name": "ko-KR-Chirp3-HD-Kore"},
-                "audioConfig": {"audioEncoding": "MP3"}
-            },
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"}
-        )
-        if response.status_code == 200:
-            return {"enabled": True, "method": "Google Cloud TTS"}
-        return {"enabled": False, "status_code": response.status_code, "error": response.text}
-
-# =====================
-# AI 챗/세션 기능 (기존 기능 유지)
-# =====================
-
-# 종료된 세션 추적 딕셔너리
-_session_closed: dict[str, bool] = {}
-
-@app.post("/chat")
-async def chat(req: Request):
-    data = await req.json()
-    session_id = data.get("session_id")
-    seller_msg = data.get("seller_msg")
-    if not session_id or not seller_msg:
-        raise HTTPException(400, detail="session_id and seller_msg required")
-
-    # 세션 종료 여부 확인
-    if _session_closed.get(session_id):
-        async def end_stream():
-            yield "이미 종료된 대화입니다.\n"
-        return StreamingResponse(end_stream(), media_type="text/event-stream")
-
-    if session_id not in _sessions:
-        _sessions[session_id] = SalesPersonaAI()
-    engine = _sessions[session_id]
-    generator = engine.stream_response(seller_msg)
-
-    async def event_stream():
-        try:
-            full_response = ""
-            for chunk in generator:
-                full_response += chunk
-                yield f"{chunk}\n"
-
-            # UPDATED: 대화 종료 태그를 감지하면 세션만 종료하고 추가 이벤트를 보내지 않음
-            if "<대화 종료>" in full_response:
-                _session_closed[session_id] = True
-                # 자동 분석 페이지 이동 신호를 보내지 않음
-
-        except Exception as e:
-            yield f"error: {str(e)}\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-@app.post("/chat/initiate")
-async def initiate_chat(req: Request):
-    data = await req.json()
-    session_id = data.get("session_id")
-    persona = data.get("persona")
-    if not session_id:
-        raise HTTPException(400, detail="session_id required")
-    if session_id not in _sessions:
-        if not persona:
-            persona = random_persona()
-        _sessions[session_id] = SalesPersonaAI(persona=persona)
-    # 세션 시작 시 종료 상태 초기화
-    _session_closed[session_id] = False
-    ai = _sessions[session_id]
-    greeting = ai.generate_first_greeting()
-    ai._append_history("AI", greeting)
-    return JSONResponse({"message": greeting})
-
-# =====================
-# 페르소나 관련 (삭제하지 않음)
-# =====================
-
-@app.get("/persona/random")
-def get_random_persona():
-    return random_persona()
-
-@app.get("/scenarios")
-def get_scenarios():
-    return SCENARIOS
-
-@app.get("/persona")
-def list_personas():
-    return PRESET_PERSONAS + PERSONAS
-
-@app.post("/persona")
-async def add_persona(req: Request):
-    data = await req.json()
-    data['id'] = str(uuid.uuid4())
-    PERSONAS.append(data)
-    return data
-
-@app.delete("/persona/{persona_id}")
-def delete_persona(persona_id: str):
-    idx = next((i for i, p in enumerate(PERSONAS) if p.get('id') == persona_id), None)
-    if idx is not None:
-        PERSONAS.pop(idx)
-        return {"success": True}
-    raise HTTPException(404, detail="Persona not found")
-
-# =====================
-# 퍼포먼스 분석 및 종료 여부
-# =====================
-
-@app.post("/analyze")
-async def analyze(req: Request):
-    data = await req.json()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise HTTPException(400, detail="session_id required")
-    engine = _sessions.get(session_id)
-    if not engine:
-        raise HTTPException(404, detail="session not found")
-    text, _score = engine.analyze_conversation()
-    return PlainTextResponse(text)
-
-@app.post("/autoclose")
-async def autoclose(req: Request):
-    data = await req.json()
-    session_id = data.get("session_id")
-    if not session_id:
-        raise HTTPException(400, detail="session_id required")
-    engine = _sessions.get(session_id)
-    if not engine:
-        raise HTTPException(404, detail="session not found")
-    should_close, reason = engine.maybe_autoclose()
-    return JSONResponse({"should_close": should_close, "reason": reason})
-# =====================
-# 일상 챗봇 엔드포인트
-# =====================
-
-
-# Simple chatbot with session memory
-@app.post("/chatbot")
-async def chatbot(req: Request):
-    data = await req.json()
-    user_msg = data.get("message")
-    session_id = data.get("session_id")
-    if not user_msg:
-        raise HTTPException(400, detail="message required")
-    if not session_id:
-        raise HTTPException(400, detail="session_id required")
-    if session_id not in _simple_sessions:
-        _simple_sessions[session_id] = SimpleChatbotAI()
-    engine = _simple_sessions[session_id]
-    generator = engine.stream_response(user_msg)
-
-    async def event_stream():
-        try:
-            for chunk in generator:
-                yield f"{chunk}\n"
-        except Exception as e:
-            yield f"error: {str(e)}\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")

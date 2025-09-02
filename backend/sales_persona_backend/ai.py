@@ -72,7 +72,7 @@ class SalesPersonaAI:
 - 비속어 사용도 가능합니다.
 - 부적절한 대화가 시작되면, 고객 입장에서 부당함을 표현하며 대응하세요.
 - 대화가 너무 길어지지 않도록 적절한 타이밍에 대화를 마무리(클로징)하세요.
-- 대화 종료 시 "<대화 종료>"를 반드시 출력하고, 종료 이후에는 아무 입력에도 응답하지 마세요.
+- 대화 마무리 시 "<대화 종료>"를 반드시 출력하고, 종료 이후에는 아무 입력에도 응답하지 마세요.
 - 세일즈 이외의 민감한 주제(정치, 종교 등)는 피하세요.
 - 정보에 과도하게 예민하게 반응하지 말고, 3~5회 답변 후 자연스럽게 클로징하세요.
 - 말이 안 되는 제품명/브랜드명(예: "삼성전자 아이폰")은 언급하지 마세요.
@@ -104,6 +104,7 @@ class SalesPersonaAI:
 - 존댓말은 필수가 아니며, 성격에 따라 반말 사용 가능
 - 부자연스러운 제품명 언급 및 "대화 목적" 언급은 금지
 - 약 3~5회 답변 이후에는 적당히 클로징
+- 한국어 맞춤법과 띄어쓰기를 정확하게 지켜주세요.
 """
         # session history
         if self.history:
@@ -119,9 +120,14 @@ class SalesPersonaAI:
         self._append_history("판매자", seller_msg)
         prompt = self._build_prompt(seller_msg)
 
+        # 디버깅: 프롬프트 출력
+        print("[AI] LLM 프롬프트:\n", prompt)
+
         try:
             full = self.model.generate_content(prompt).text.strip()
+            print("[AI] LLM 응답:", repr(full))
         except Exception as e:
+            print("[AI] LLM 예외 발생:", e)
             full = "(응답 생성 실패: " + str(e) + ")"
 
         for prefix in ["고객:", "고객(나):", "AI:", "응답:"]:
@@ -130,10 +136,17 @@ class SalesPersonaAI:
 
         self._append_history("AI", full)
 
-        # ✅ 단어 단위 출력 (누적 아님)
-        for word in full.split():
-            yield word + " "
-            time.sleep(0.05)
+        # ✅ 문장 단위 스트리밍 (띄어쓰기 문제에 더 강건함)
+        sentences = re.split(r'([.!?])', full)
+        buf = ''
+        for part in sentences:
+            buf += part
+            if part in '.!?':
+                yield buf.strip() + ' '
+                buf = ''
+                time.sleep(0.1)
+        if buf.strip():
+            yield buf.strip() + ' '
 
     # ------------------------------------------------------------------
     def _append_history(self, role: str, content: str):

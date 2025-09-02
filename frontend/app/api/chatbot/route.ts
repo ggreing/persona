@@ -6,16 +6,20 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   let message = body.message;
   let session_id = body.session_id;
-  // messages 배열이 오면 마지막 user 메시지를 자동 추출
-  if (!message && Array.isArray(body.messages)) {
+  // messages 배열이 오면 마지막 user 메시지와 session_id를 자동 추출
+  if ((!message || !session_id) && Array.isArray(body.messages)) {
     const lastUserMsg = [...body.messages].reverse().find((m) => m.role === 'user' && m.content && typeof m.content === 'string' && m.content.trim());
     if (lastUserMsg) message = lastUserMsg.content;
-    else {
-      return new Response('No valid user message found in messages array', { status: 400 });
+    // session_id를 messages 배열의 첫 메시지에서 추출 (예시)
+    if (!session_id && body.messages.length > 0 && body.messages[0].session_id) {
+      session_id = body.messages[0].session_id;
     }
   }
-  if (!message || typeof message !== 'string' || !message.trim() || !session_id) {
-    return new Response('message and session_id required', { status: 400 });
+  if (!message || typeof message !== 'string' || !message.trim()) {
+    return new Response('message required', { status: 400 });
+  }
+  if (!session_id || typeof session_id !== 'string' || !session_id.trim()) {
+    return new Response('session_id required', { status: 400 });
   }
 
   const backendUrl = process.env.BACKEND_URL || 'http://localhost:8000/chatbot';

@@ -24,6 +24,10 @@ interface Persona {
 
 export default function ChatWindow({ initialPersona }: { initialPersona: Persona }) {
   const [messages, setMessages] = useState<Msg[]>([]);
+  // 디버깅: messages 상태 변화 추적
+  useEffect(() => {
+    console.log('[DEBUG] messages 상태 변경:', messages);
+  }, [messages]);
   const [sessionId, setSessionId] = useState<string>("");
   const [chatStarted, setChatStarted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -73,13 +77,17 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
 
     // 🔹 첫 메시지 저장
     const uid = localStorage.getItem("user_id");
+    const personaId = localStorage.getItem("persona_id"); // 필요시
     await fetch("/api/chat/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sessionId: sessionId,
+        session_id: sessionId,
+        user_id: uid || "unknown",
+        persona_id: personaId || "unknown",
         role: "ai",
         content: data.message,
+        timestamp: new Date().toISOString(),
       }),
     });
 
@@ -96,15 +104,19 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
     setMessages(newMsgs);
 
     const uid = localStorage.getItem("user_id");
+    const personaId = localStorage.getItem("persona_id"); // 필요시
 
     // 🔹 판매자 메시지 저장
     await fetch("/api/chat/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sessionId: sessionId,
+        session_id: sessionId,
+        user_id: uid || "unknown",
+        persona_id: personaId || "unknown",
         role: "seller",
         content: text,
+        timestamp: new Date().toISOString(),
       }),
     });
 
@@ -121,63 +133,55 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
 
     setMessages((msgs) => [...msgs, { role: "ai", content: "Typing..." }]);
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        let aiMsg = "";
-        let hasConversationEnded = false;
-        
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n');
-          
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.replace(/^data: /, '');
-              aiMsg += data;
-              
-              setMessages((msgs) => {
-                const updated = [...msgs];
-                const last = updated[updated.length - 1];
-                if (last?.role === "ai") {
-                  updated[updated.length - 1] = { ...last, content: aiMsg };
-                }
-                return updated;
-              });
-            } else if (line.startsWith('event: conversation_end')) {
-              hasConversationEnded = true;
-              console.log("🎯 대화종료 이벤트 감지");
-            }
-          }
+    let aiMsg = "";
+    let hasConversationEnded = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('event: conversation_end')) {
+          hasConversationEnded = true;
+          console.log("🎯 대화종료 이벤트 감지");
+        } else {
+          aiMsg += trimmed;
         }
-
-        // 🔹 AI 응답 저장
-        await fetch("/api/chat/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: sessionId,
-            role: "ai",
-            content: aiMsg,
-          }),
-        });
-
-        // 페르소나 정보와 함께 TTS 호출
-        speak(aiMsg, initialPersona);
-        
-        // 대화종료 감지 시 상태 업데이트
-        if (hasConversationEnded) {
-          setConversationEnded(true);
-          console.log("🎯 대화종료 상태 설정");
+      }
+      // 실시간으로 메시지 반영
+      setMessages((msgs) => {
+        const updated = [...msgs];
+        const last = updated[updated.length - 1];
+        if (last?.role === "ai") {
+          updated[updated.length - 1] = { ...last, content: aiMsg };
         }
-        
-        controller.close();
-      },
+        return updated;
+      });
+      // 디버깅: 실시간 메시지 업데이트
+      console.log('[DEBUG] setMessages 내부 aiMsg:', aiMsg);
+    }
+
+    // 🔹 AI 응답 저장
+    await fetch("/api/chat/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: sessionId,
+        role: "ai",
+        content: aiMsg,
+      }),
     });
 
-    await new Response(stream).text();
+    // 페르소나 정보와 함께 TTS 호출
+    speak(aiMsg, initialPersona);
+
+    // 대화종료 감지 시 상태 업데이트
+    if (hasConversationEnded) {
+      setConversationEnded(true);
+      console.log("🎯 대화종료 상태 설정");
+    }
   };
 
   // 스크롤 아래로 이동
@@ -226,6 +230,8 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
   }
 
   // 채팅 화면
+  // 디버깅: MessageList 렌더 직전
+  console.log('[DEBUG] MessageList 렌더 items:', messages);
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-bold text-blue-800 mb-4">💬 세일즈 AI 상담</h1>
