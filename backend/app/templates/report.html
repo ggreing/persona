@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>대화 분석 리포트</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 20px auto; padding: 0 20px; }
+        h1, h2, h3 { color: #1a1a1a; }
+        .report-header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+        .score-circle { width: 150px; height: 150px; border-radius: 50%; background-color: #007aff; color: white; display: flex; justify-content: center; align-items: center; flex-direction: column; margin: 20px auto; }
+        .score { font-size: 48px; font-weight: bold; }
+        .score-label { font-size: 16px; }
+        .section { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .keywords { display: flex; flex-wrap: wrap; gap: 10px; }
+        .keyword { background-color: #eef5ff; color: #005fcc; padding: 5px 12px; border-radius: 15px; font-size: 14px; }
+        pre { background-color: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body>
+    <div class="report-header">
+        <h1>대화 분석 리포트</h1>
+        <p><strong>세션 ID:</strong> {{ report.session_id }}</p>
+        <p><strong>분석 일시:</strong> {{ report.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+    </div>
+
+    <div class="section">
+        <h2>종합 점수</h2>
+        <div class="score-circle">
+            <span class="score">{{ "%.1f"|format(report.score) }}</span>
+            <span class="score-label">/ 100점</span>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>주요 키워드</h2>
+        <div class="keywords">
+            {% for keyword in report.keywords %}
+                <span class="keyword">{{ keyword }}</span>
+            {% else %}
+                <span>추출된 키워드가 없습니다.</span>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>상세 분석 및 제안</h2>
+        <pre>{{ report.summary }}</pre>
+    </div>
+
+</body>
+</html>
