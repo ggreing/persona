@@ -39,6 +39,8 @@ class ChatMessage(BaseModel):
     role: str  # "seller" or "ai"
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    tts_status: Optional[str] = "not_required" # "not_required", "pending", "completed", "failed"
+    audio_url: Optional[str] = None
 
 class AnalysisReport(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))

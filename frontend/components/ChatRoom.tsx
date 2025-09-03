@@ -32,9 +32,14 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
   const [chatStarted, setChatStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [conversationEnded, setConversationEnded] = useState(false);
-  const { speak } = useTTS();
+  const { speakOnce, isPlaying, error: ttsError } = useTTS();
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+
+  // TTS 파라미터 상태
+  const [ttsRate, setTtsRate] = useState(1.1);
+  const [ttsPitch, setTtsPitch] = useState(0);
+  const [ttsModel, setTtsModel] = useState("GoogleTTS");
 
   // 세션 ID 초기화
   useEffect(() => {
@@ -63,36 +68,22 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
   const startChat = async () => {
     if (!initialPersona || !sessionId) return;
     setLoading(true);
-    const backend = process.env.NEXT_PUBLIC_BACKEND_URL!;
-    const res = await fetch(`${backend}/chat/initiate`, {
+    const backend = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    // 새로운 백엔드 API 엔드포인트로 수정
+    const res = await fetch(`${backend}/api/chat/initiate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        session_id: sessionId,
-        persona: initialPersona,
+        user_id: localStorage.getItem("user_id") || "unknown",
+        persona_id: localStorage.getItem("persona_id") || "unknown",
       }),
     });
     const data = await res.json();
+    // 백엔드에서 대화 기록을 관리하므로, 프론트엔드에서는 첫 메시지만 표시
     setMessages([{ role: "ai", content: data.message }]);
 
-    // 🔹 첫 메시지 저장
-    const uid = localStorage.getItem("user_id");
-    const personaId = localStorage.getItem("persona_id"); // 필요시
-    await fetch("/api/chat/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        user_id: uid || "unknown",
-        persona_id: personaId || "unknown",
-        role: "ai",
-        content: data.message,
-        timestamp: new Date().toISOString(),
-      }),
-    });
-
     // 페르소나 정보와 함께 TTS 호출
-    speak(data.message, initialPersona);
+    speakOnce(data.message, { speaking_rate: ttsRate, pitch: ttsPitch, model: ttsModel });
     setChatStarted(true);
     setLoading(false);
   };
@@ -100,87 +91,54 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
   // 메시지 전송 처리
   const handleSend = async (text: string) => {
     if (!text.trim() || !sessionId) return;
-    const newMsgs: Msg[] = [...messages, { role: "seller" as "seller", content: text }];
+    // 사용자 메시지를 즉시 UI에 반영
+    const newMsgs: Msg[] = [...messages, { role: "seller", content: text }];
     setMessages(newMsgs);
 
-    const uid = localStorage.getItem("user_id");
-    const personaId = localStorage.getItem("persona_id"); // 필요시
-
-    // 🔹 판매자 메시지 저장
-    await fetch("/api/chat/save", {
+    const backend = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
+    // 새로운 SSE 스트리밍 엔드포인트로 수정
+    const res = await fetch(`${backend}/api/chat/${sessionId}/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        user_id: uid || "unknown",
-        persona_id: personaId || "unknown",
-        role: "seller",
-        content: text,
-        timestamp: new Date().toISOString(),
-      }),
-    });
-
-    const backend = process.env.NEXT_PUBLIC_BACKEND_URL!;
-    const res = await fetch(`${backend}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seller_msg: text, session_id: sessionId }),
+      body: JSON.stringify({ seller_msg: text }),
     });
 
     if (!res.body) return;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
 
-    setMessages((msgs) => [...msgs, { role: "ai", content: "Typing..." }]);
+    // AI 응답을 표시하기 위해 대기 상태 추가
+    setMessages((msgs) => [...msgs, { role: "ai", content: "" }]);
 
-    let aiMsg = "";
-    let hasConversationEnded = false;
+    let aiMsgBuffer = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        if (trimmed.startsWith('event: conversation_end')) {
-          hasConversationEnded = true;
-          console.log("🎯 대화종료 이벤트 감지");
-        } else {
-          aiMsg += trimmed;
+      const chunk = decoder.decode(value, { stream: true });
+
+      const parts = chunk.split("\n\n");
+      for (const part of parts) {
+        if (part.startsWith("data: ")) {
+            aiMsgBuffer += part.substring(6);
+            // 실시간으로 AI 메시지 업데이트
+            setMessages((msgs) => {
+                const updated = [...msgs];
+                if (updated.length > 0 && updated[updated.length - 1].role === "ai") {
+                    updated[updated.length - 1].content = aiMsgBuffer;
+                }
+                return updated;
+            });
         }
       }
-      // 실시간으로 메시지 반영
-      setMessages((msgs) => {
-        const updated = [...msgs];
-        const last = updated[updated.length - 1];
-        if (last?.role === "ai") {
-          updated[updated.length - 1] = { ...last, content: aiMsg };
-        }
-        return updated;
-      });
-      // 디버깅: 실시간 메시지 업데이트
-      console.log('[DEBUG] setMessages 내부 aiMsg:', aiMsg);
     }
 
-    // 🔹 AI 응답 저장
-    await fetch("/api/chat/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: sessionId,
-        role: "ai",
-        content: aiMsg,
-      }),
-    });
+    // 최종 AI 메시지로 TTS 호출
+    speakOnce(aiMsgBuffer, { speaking_rate: ttsRate, pitch: ttsPitch, model: ttsModel });
 
-    // 페르소나 정보와 함께 TTS 호출
-    speak(aiMsg, initialPersona);
-
-    // 대화종료 감지 시 상태 업데이트
-    if (hasConversationEnded) {
+    // 대화 종료 감지
+    if (aiMsgBuffer.includes("<대화 종료>")) {
       setConversationEnded(true);
-      console.log("🎯 대화종료 상태 설정");
+      console.log("🎯 대화종료 감지");
     }
   };
 
@@ -235,11 +193,35 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-bold text-blue-800 mb-4">💬 세일즈 AI 상담</h1>
+
+      {/* TTS 제어 UI */}
+      <div className="bg-gray-100 p-4 rounded-lg mb-4 space-y-4">
+          <h3 className="font-bold text-gray-700">🔊 TTS 설정</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                  <label htmlFor="tts-model" className="block text-sm font-medium text-gray-600">TTS 모델</label>
+                  <select id="tts-model" value={ttsModel} onChange={e => setTtsModel(e.target.value)} className="mt-1 block w-full p-2 border border-gray-300 rounded-md">
+                      <option>GoogleTTS</option>
+                      {/* 다른 모델 추가 가능 */}
+                  </select>
+              </div>
+              <div>
+                  <label htmlFor="tts-rate" className="block text-sm font-medium text-gray-600">재생 속도: {ttsRate.toFixed(1)}</label>
+                  <input type="range" id="tts-rate" min="0.5" max="2.0" step="0.1" value={ttsRate} onChange={e => setTtsRate(parseFloat(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+              </div>
+              <div>
+                  <label htmlFor="tts-pitch" className="block text-sm font-medium text-gray-600">음성 피치: {ttsPitch.toFixed(1)}</label>
+                  <input type="range" id="tts-pitch" min="-5" max="5" step="0.5" value={ttsPitch} onChange={e => setTtsPitch(parseFloat(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"/>
+              </div>
+          </div>
+          {ttsError && <div className="text-red-500 text-sm mt-2">TTS 오류: {ttsError}</div>}
+      </div>
+
       <div className="bg-white p-4 rounded shadow min-h-[300px]">
         <MessageList items={messages} />
         <div ref={bottomRef} />
       </div>
-      <MessageInput onSend={handleSend} />
+      <MessageInput onSend={handleSend} disabled={isPlaying} />
       <div className="mt-4 flex justify-between items-center">
         {messages.length > 6 && (
           <Link href={`/analyze/${sessionId}`}>
@@ -254,7 +236,7 @@ export default function ChatWindow({ initialPersona }: { initialPersona: Persona
           onClick={() => {
             const testMessage = "네, 그럼 그렇게 하겠습니다. <대화종료> (차분하게) 좋은 상담이었습니다.";
             setMessages(prev => [...prev, { role: "ai", content: testMessage }]);
-            speak(testMessage, initialPersona);
+            speakOnce(testMessage, { speaking_rate: ttsRate, pitch: ttsPitch, model: ttsModel });
             setTimeout(() => setConversationEnded(true), 1000);
           }}
           className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 text-sm"

@@ -9,10 +9,19 @@ from .memory import HybridMemoryManager
 from .chat_history import chat_history_service
 from .analysis_db import analysis_db_service
 
-# TODO: .env 또는 config 파일로 이동
-# from ..config import API_KEY, MODEL_NAME
-API_KEY = "YOUR_API_KEY" # 실제 키로 교체해야 합니다.
-MODEL_NAME = "gemini-1.5-flash"
+import os
+from dotenv import load_dotenv
+
+# .env 파일에서 환경 변수 로드
+load_dotenv()
+
+# API_KEY 및 모델 이름 환경 변수에서 가져오기
+API_KEY = os.getenv("GOOGLE_API_KEY")
+MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
+
+# API 키가 설정되지 않은 경우 예외 처리
+if not API_KEY:
+    raise ValueError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
 genai.configure(api_key=API_KEY)
 
 

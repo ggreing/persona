@@ -38,7 +38,8 @@ class ChatRequest(BaseModel):
 async def initiate_chat(
     init_request: ChatInitiateRequest,
     history_service: ChatHistoryService = Depends(get_chat_history_service),
-    persona_service: PersonaDBService = Depends(get_persona_db_service)
+    persona_service: PersonaDBService = Depends(get_persona_db_service),
+    ai_service: SalesPersonaAIService = Depends(get_ai_service)
 ):
     """
     새로운 대화 세션을 시작합니다.
@@ -46,21 +47,20 @@ async def initiate_chat(
     - AI 페르소나의 첫 인사를 생성하여 반환합니다.
     """
     try:
-        # TODO: persona_id로 페르소나 정보를 Qdrant에서 실제로 가져와야 함.
-        # 현재는 임시 페르소나 객체를 사용합니다.
-        temp_persona_payload = {
-            "id": init_request.persona_id, "gender": "여성", "age_group": "30대",
-            "personality": "신중함", "tech": "중급", "goal": "가성비 좋은 TV 구매",
-            "usage": "영화 감상", "type": "실용주의"
-        }
-        persona = Persona(**temp_persona_payload)
+        # persona_id로 페르소나 정보를 Qdrant에서 실제로 가져옵니다.
+        # get_all_personas는 리스트를 반환하므로, ID로 특정 페르소나를 찾는 함수가 필요합니다.
+        # 지금은 임시로 첫 번째 페르소나를 가져오거나, 필터링합니다.
+        all_personas = await persona_service.get_all_personas()
+        persona = next((p for p in all_personas if p.id == init_request.persona_id), None)
+        if not persona:
+            raise HTTPException(status_code=404, detail="페르소나를 찾을 수 없습니다.")
 
         # 1. 세션 생성
         session = await history_service.create_session(init_request.user_id, init_request.persona_id)
 
-        # 2. AI의 첫 인사 생성 (이 부분은 ai_persona 서비스에 추가 필요)
-        # greeting = await ai_service.generate_first_greeting(persona)
-        greeting = f"안녕하세요! {persona.goal}을(를) 찾고 계신가요?" # 임시 인사
+        # 2. AI의 첫 인사 생성
+        # TODO: ai_persona_service에 generate_first_greeting 메서드 구현 필요
+        greeting = f"안녕하세요! {persona.goal}에 대해 궁금한 점이 있으신가요?"
 
         # 3. 첫 인사를 대화 기록에 추가
         await history_service.add_message(session.id, "ai", greeting)
@@ -76,19 +76,22 @@ async def stream_chat(
     session_id: str,
     chat_request: ChatRequest,
     ai_service: SalesPersonaAIService = Depends(get_ai_service),
+    history_service: ChatHistoryService = Depends(get_chat_history_service),
     persona_service: PersonaDBService = Depends(get_persona_db_service)
 ):
     """
     지정된 세션에서 AI와 대화를 스트리밍 방식으로 주고받습니다. (SSE)
     """
     try:
-        # TODO: session_id를 통해 persona_id를 조회하고, persona 객체를 가져와야 함
-        temp_persona_payload = {
-            "id": "temp-persona", "gender": "여성", "age_group": "30대",
-            "personality": "신중함", "tech": "중급", "goal": "가성비 좋은 TV 구매",
-            "usage": "영화 감상", "type": "실용주의"
-        }
-        persona = Persona(**temp_persona_payload)
+        # session_id를 통해 persona_id를 조회하고, persona 객체를 가져옵니다.
+        session = await history_service.get_session_history(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+        all_personas = await persona_service.get_all_personas()
+        persona = next((p for p in all_personas if p.id == session.persona_id), None)
+        if not persona:
+            raise HTTPException(status_code=404, detail="페르소나를 찾을 수 없습니다.")
 
         async def event_stream():
             try:

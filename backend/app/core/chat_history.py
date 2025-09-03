@@ -9,9 +9,10 @@ class ChatHistoryService:
         await db["chat_sessions"].insert_one(session.dict())
         return session
 
-    async def add_message(self, session_id: str, role: str, content: str):
+    async def add_message(self, session_id: str, role: str, content: str, requires_tts: bool = False):
         db = await get_database()
-        message = ChatMessage(role=role, content=content)
+        status = "pending" if requires_tts and role == "ai" else "not_required"
+        message = ChatMessage(role=role, content=content, tts_status=status)
         await db["chat_sessions"].update_one(
             {"id": session_id},
             {"$push": {"messages": message.dict()}}
